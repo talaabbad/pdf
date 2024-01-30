@@ -1,0 +1,158 @@
+Dependencies:
+
+pdf: ^3.10.7
+path_provider: ^2.1.2
+open_file: ^3.3.2
+//firebase_storage: ^11.6.0 //to store pdf in db
+
+in yaml:
+flutter:
+  assets:
+    - assets/images/logo.png //for the logo in pdf
+    
+    
+import 'dart:io';
+import 'package:pdf/pdf.dart';
+import 'package:pdf/widgets.dart' as pw;
+import 'package:intl/intl.dart';
+import 'package:flutter/services.dart' show rootBundle;
+import 'package:firebase_storage/firebase_storage.dart';
+import 'package:firebase_core/firebase_core.dart';
+import 'package:flutter/material.dart';
+
+Previewing pdf files:
+
+Column(
+children : Document.doc_list
+.map((doc)=> ListTile(
+onTap:(){},
+title:Text(
+doc.doc_title!,
+style:GoogleFonts.nunito(),
+overflow:TextOverflow.ellipsis,
+),//Text
+subtitle:Text("${doc.page_num!} Pages"),//doc pg numbers
+
+trailing:Text(
+doc.doc_date!,
+style:GoogleFonts.nunito(color:Colors.grey),
+)//Text *for doc date
+
+Leading: Icon(
+Icons.picture_as_pdf,
+color:Colors.red,
+size:32.0,
+)//pdf logo
+
+)//column
+
+Creating pdf file:
+
+Future<void> createPdf() async {
+  final pdf = pw.Document();
+  
+  String storyTitle = "MyStoryTitle"; // Replace with   story title
+  String fileName = "${storyTitle.replaceAll(' ', '_')}.pdf";
+  
+  final image = pw.MemoryImage(
+    (await rootBundle.load('assets/images/logo.png')).buffer.asUint8List(),
+  );
+
+pdf.addPage(
+    pw.Page(
+      build: (pw.Context context) {
+        return pw.Column(
+          crossAxisAlignment: pw.CrossAxisAlignment.start,
+          children: [
+            pw.Row(
+              mainAxisAlignment: pw.MainAxisAlignment.spaceBetween,
+              children: [
+                pw.Image(image, width: 50, height: 50), // Logo image
+                pw.Text('قصtech', style: pw.TextStyle(fontSize: 24)),
+                pw.Text(DateFormat('yyyy-MM-dd').format(DateTime.now()),
+                    style: pw.TextStyle(fontSize: 18)),//creation date
+              ],
+            ),
+            pw.SizedBox(height: 20),
+            pw.Text('*Story*', style: pw.TextStyle(fontSize: 18)),
+            pw.SizedBox(height: 20),
+            pw.Container(
+              width: 200,
+              height: 200,
+              color: PdfColors.grey300,
+              child: pw.Center(child: pw.Text('Image Placeholder')),
+            ),
+          ],
+        );
+      },
+    ),
+  );
+
+//Saving pdf 
+final output = File(fileName);
+await output.writeAsBytes(await pdf.save());//waits until it finishes writing all the file
+
+
+final String userId = FirebaseAuth.instance.currentUser!.uid;
+  late ValueNotifier<bool> refreshNotifier;
+  Map<String, dynamic>? userInfo;
+
+  @override
+  void initState() {
+    super.initState();
+    refreshNotifier = ValueNotifier<bool>(false);
+    fetchUserInfo();
+  }
+
+  Future<void> fetchUserInfo() async {
+    try {
+      DocumentSnapshot<Map<String, dynamic>> ds =
+          await FirebaseFirestore.instance.collection("User").doc(userId).get();
+      userInfo = ds.data();
+      if (mounted) {
+        setState(() {});
+      }
+    } catch (e) {
+      ScaffoldMessenger.of(context).showSnackBar(
+         CustomSnackBar(
+          content: "المعذرة، حصل خطأ",icon: Icons.warning),
+      );
+    }
+  }
+
+
+//Save pdf in DB
+String userId = ds; // Replace with the actual user ID
+  String filePath = `users/${userId}/stories/${storyId}.pdf`;
+  try {
+    await FirebaseStorage.instance.ref(filePath).putFile(output);
+    print('تم رفع الملف بنجاح');
+  } catch (e) {
+    print(e.toString("المعذرة لايمكن رفع الملف"));
+    // Handle any errors
+  }
+}
+
+
+
+
+
+}//end of createpdf() class
+
+
+
+
+
+
+
+
+
+
+
+
+}
+
+
+
+
+
