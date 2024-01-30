@@ -10,7 +10,13 @@ flutter:
   assets:
     - assets/images/logo.png //for the logo in pdf
     
-    
+  import 'dart:convert';
+import 'package:flutter/material.dart';
+import 'package:dart_openai/dart_openai.dart';
+import 'package:flutter_config/flutter_config.dart';
+import 'package:flutter_dotenv/flutter_dotenv.dart';
+import 'package:http/http.dart' as http;
+import 'global_story.dart';
 import 'dart:io';
 import 'package:pdf/pdf.dart';
 import 'package:pdf/widgets.dart' as pw;
@@ -18,44 +24,189 @@ import 'package:intl/intl.dart';
 import 'package:flutter/services.dart' show rootBundle;
 import 'package:firebase_storage/firebase_storage.dart';
 import 'package:firebase_core/firebase_core.dart';
-import 'package:flutter/material.dart';
+import 'package:google_fonts/google_fonts.dart';
 
-Previewing pdf files:
 
-Column(
-children : Document.doc_list
-.map((doc)=> ListTile(
-onTap:(){},
-title:Text(
-doc.doc_title!,
-style:GoogleFonts.nunito(),
-overflow:TextOverflow.ellipsis,
-),//Text
-subtitle:Text("${doc.page_num!} Pages"),//doc pg numbers
+class Illustration extends StatefulWidget {
+  final String title;
+  final String content;
+  //final List<dynamic> clausesToIllujstrate;
 
-trailing:Text(
-doc.doc_date!,
-style:GoogleFonts.nunito(color:Colors.grey),
-)//Text *for doc date
+  Illustration({
+    Key? key,
+    required this.title,
+    required this.content,
+    required List<String> clausesToIllujstrate,
+    //required this.clausesToIllujstrate
+  }) : super(key: key);
 
-Leading: Icon(
-Icons.picture_as_pdf,
-color:Colors.red,
-size:32.0,
-)//pdf logo
+  @override
+  State<Illustration> createState() => _IllustrationState();
+}
 
-)//column
+/*class _IllustrationState extends State<Illustration> {
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      appBar: AppBar(
+        title: Text('صفحه الامج جنريشن'),
+      ),
+      body: Container(
+        color: Colors.blue, 
+        alignment: Alignment.center,
+        child: Text(widget.clausesToIllujstrate[0]),
 
-Creating pdf file:
+      ),
+    );
+  }
+}*/
 
-Future<void> createPdf() async {
+class _IllustrationState extends State<Illustration> {
+  List<String> imageUrls = [];
+  bool isLoading = false;
+
+  @override
+  void initState() {
+    super.initState();
+    generateAllImages();
+  }
+
+  void generateAllImages() async {
+    setState(() {
+      isLoading = true;
+    });
+    //List<String> urls = [];
+    for (var clause in globaltopClausesToIllustrate) {
+      // Translate the clause first
+      String translatedClause = await translateClause(clause);
+
+      // Then generate image for the translated clause
+      String imageUrl = await generateImage(translatedClause);
+      globalImagesUrls.add(imageUrl);
+      //urls.add(imageUrl);
+    }
+    setState(() {
+      //imageUrls = urls;
+      isLoading = false;
+    });
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      appBar: AppBar(
+        title: Text('صفحه الامج جنريشن'),
+      ),
+      body: isLoading
+          ? Center(child: CircularProgressIndicator())
+          : Container(
+              color: Colors.blue,
+              child: ListView.builder(
+                itemCount: globalImagesUrls.length,
+                itemBuilder: (context, index) {
+                  return globalImagesUrls[index].isNotEmpty
+                      ? Image.network(globalImagesUrls[index])
+                      : Text("No image available");
+                },
+              ),
+            ),
+    );
+  }
+}
+
+Future<String> generateImage(String prompt) async {
+  OpenAI.apiKey = dotenv.env['OPENAI_KEY']!;
+  //OpenAI.apiKey =FlutterConfig.get('OPENAI_KEY'); // Accessing the OpenAI API Key
+  try {
+    final OpenAIImageModel image = await OpenAI.instance.image.create(
+      prompt: prompt,
+      model: "dall-e-2", // Explicitly specifying the model
+      n: 1,
+      size: OpenAIImageSize.size1024,
+      responseFormat: OpenAIImageResponseFormat.url,
+    );
+
+    if (image.data.isNotEmpty) {
+      return image.data.first.url ??
+          ''; // Return an empty string if the url is null
+    } else {
+      throw Exception('No image data received');
+    }
+  } catch (e) {
+    print("Failed to generate image: $e");
+    rethrow; // Rethrow the exception for the calling widget to handle
+  }
+}
+
+Future<String> translateClause(String clause) async {
+  var API_key = dotenv.env['GOOGLE_TRANSLATE_KEY']!;
+
+  //var API_key = FlutterConfig.get('GOOGLE_TRANSLATE_KEY'); // Accessing the Google Translate API Key
+  //const API_key = 'AIzaSyBPai8q0ugOh1-wowQBpa2k0Gae1N5e-_k';
+  const to = 'en'; //Destination language
+
+  final url = Uri.parse(
+      'https://translation.googleapis.com/language/translate/v2?q=$clause&target=$to&key=$API_key');
+
+  final response = await http.post(url);
+
+  if (response.statusCode == 200) {
+    final body = json.decode(response.body);
+    final translations = body['data']['translations'] as List<dynamic>;
+    final translation = translations.first['translatedText'];
+
+    // Print the translated text to the console
+    print('Original: $clause');
+    print('Translated: $translation');
+
+    return translation;
+  } else {
+    print('Translation Error: ${response.statusCode}');
+    return 'Translation Error: ${response.statusCode}';
+  }
+}
+
+class DocumentScreen extends StatefulWidget {
+  @override
+  _DocumentScreenState createState() => __Illustration();
+}
+
+class _DocumentScreenState extends State<_IllustrationState> {
+  late ValueNotifier<bool> refreshNotifier;
+  Map<String, dynamic>? ds;
+  List<Document> doc_list = [docTitle]; // Replace with your actual document list
+
+  @override
+  void initState() {
+    super.initState();
+    refreshNotifier = ValueNotifier<bool>(false);
+    fetchUserInfo();
+    // Initialize your document list here
+  }
+
+  Future<void> fetchUserInfo() async {
+try {
+    String userId = FirebaseAuth.instance.currentUser!.uid;
+    DocumentSnapshot<Map<String, dynamic>> ds =
+        await FirebaseFirestore.instance.collection("users").doc(userId).get();
+    userInfo = ds.data();
+
+    if (mounted) {
+      setState(() {});
+    }
+  } catch (e) {
+    print('Error  user info: $e');
+  }
+}  }
+
+  Future<void> createPdf() async {
   final pdf = pw.Document();
   
-  String storyTitle = "MyStoryTitle"; // Replace with   story title
-  String fileName = "${storyTitle.replaceAll(' ', '_')}.pdf";
+  String storyTitle = "${title}.pdf"; // Replace with   story title
+  String fileName = "${title.replaceAll(' ', '_')}.pdf";
   
   final image = pw.MemoryImage(
-    (await rootBundle.load('assets/images/logo.png')).buffer.asUint8List(),
+    (await rootBundle.load('assets/appLogo.png')).buffer.asUint8List(),
   );
 
 pdf.addPage(
@@ -81,75 +232,32 @@ pdf.addPage(
               height: 200,
               color: PdfColors.grey300,
               child: pw.Center(child: pw.Text('Image Placeholder')),
-            ),
-          ],
-        );
-      },
-    ),
-  );
-
-//Saving pdf 
-final output = File(fileName);
-await output.writeAsBytes(await pdf.save());//waits until it finishes writing all the file
-
-
-final String userId = FirebaseAuth.instance.currentUser!.uid;
-  late ValueNotifier<bool> refreshNotifier;
-  Map<String, dynamic>? userInfo;
+            ), ], ); }, ), ); }
 
   @override
-  void initState() {
-    super.initState();
-    refreshNotifier = ValueNotifier<bool>(false);
-    fetchUserInfo();
-  }
+  Widget build(BuildContext context) {
+    return Scaffold(
+      appBar: AppBar(
+        title: Text("pdf Screen"),
+      ),
+      body: Column(
+        children: doc_list.map((doc) => ListTile(
+          onTap: () {
+          },
+          title: Text(
+            doc.doc_title,
+            style: GoogleFonts.nunito(),
+            overflow: TextOverflow.ellipsis,
+          ),
+          leading: Icon(
+            Icons.picture_as_pdf,
+            color: Colors.red,
+            size: 32.0,
+          ),  )).toList(), ), ); }
 
-  Future<void> fetchUserInfo() async {
-    try {
-      DocumentSnapshot<Map<String, dynamic>> ds =
-          await FirebaseFirestore.instance.collection("User").doc(userId).get();
-      userInfo = ds.data();
-      if (mounted) {
-        setState(() {});
-      }
-    } catch (e) {
-      ScaffoldMessenger.of(context).showSnackBar(
-         CustomSnackBar(
-          content: "المعذرة، حصل خطأ",icon: Icons.warning),
-      );
-    }
-  }
-
-
-//Save pdf in DB
-String userId = ds; // Replace with the actual user ID
-  String filePath = `users/${userId}/stories/${storyId}.pdf`;
-  try {
-    await FirebaseStorage.instance.ref(filePath).putFile(output);
-    print('تم رفع الملف بنجاح');
-  } catch (e) {
-    print(e.toString("المعذرة لايمكن رفع الملف"));
-    // Handle any errors
-  }
-}
-
-
-
-
-
-}//end of createpdf() class
-
-
-
-
-
-
-
-
-
-
-
-
+class Document {
+  String doc_title;
+  Document(this.doc_title);
 }
 
 
